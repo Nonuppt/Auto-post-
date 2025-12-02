@@ -12,7 +12,7 @@ except ModuleNotFoundError as e:
 
 # ----- USER CONFIG -----
 # CRITICAL SECURITY WARNING: Ideally, load these from environment variables (os.getenv)
-BOT_TOKEN = "8488614783:AAE4Z1GZDYxaDMMxOc9Owofbpw3kaokPIHs"
+BOT_TOKEN = "8488614783:AAEBAdRDEnRL3G7QafCp8Hp81LPyypni8go"
 TMDB_API = "c5b6317ff1ba730c5742a94440d31af4"
 
 DB_CHANNEL = -1002837138676

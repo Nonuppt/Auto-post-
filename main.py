@@ -1,20 +1,17 @@
 import logging
 import requests
 import asyncio
-import sys
 
 try:
-    from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-    from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes, Application
-    from telegram.error import Conflict
+    from telegram import InputMediaPhoto, InlineKeyboardButton, InlineKeyboardMarkup
+    from telegram.ext import ApplicationBuilder, MessageHandler, filters
 except ModuleNotFoundError as e:
     raise ModuleNotFoundError(
-        "python-telegram-bot package not found. Install dependencies with 'pip install -r requirements.txt'."
+        "python-telegram-bot package not found. Install dependencies with 'pip install -r requirements.txt' or run 'pip install python-telegram-bot'."
     ) from e
 
 # ----- USER CONFIG -----
-# REPLACE THIS WITH YOUR *NEW* TOKEN FROM BOTFATHER
-BOT_TOKEN = "8488614783:AAE4Z1GZDYxaDMMxOc9Owofbpw3kaokPIHs" 
+BOT_TOKEN = "8488614783:AAE4Z1GZDYxaDMMxOc9Owofbpw3kaokPIHs"
 TMDB_API = "c5b6317ff1ba730c5742a94440d31af4"
 
 DB_CHANNEL = -1002837138676
@@ -25,13 +22,11 @@ DOWNLOAD_LINK = "https://t.me/+FnbegV_ohyo4YzE1"
 BACKUP_LINK = "http://t.me/Pixell_Pulse"
 # ------------------------
 
-logging.basicConfig(
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
+logging.basicConfig(level=logging.INFO)
+
 
 def search_tmdb(query: str):
-    """Synchronous TMDB search helper."""
+    """Synchronous TMDB search helper. Returns dict or None."""
     try:
         url = "https://api.themoviedb.org/3/search/multi"
         params = {"api_key": TMDB_API, "query": query}
@@ -39,7 +34,7 @@ def search_tmdb(query: str):
         r.raise_for_status()
         data_json = r.json()
     except Exception:
-        logging.error("TMDB request failed")
+        logging.exception("TMDB request failed")
         return None
 
     results = data_json.get("results") or []
@@ -49,73 +44,70 @@ def search_tmdb(query: str):
     data = results[0]
     poster = f"https://image.tmdb.org/t/p/w500{data['poster_path']}" if data.get("poster_path") else None
     title = data.get("title") or data.get("name")
-    media_type = data.get("media_type")
+    type_media = data.get("media_type")   # movie or tv
 
-    return {"title": title, "poster": poster, "type": media_type}
+    return {
+        "title": title,
+        "poster": poster,
+        "type": type_media
+    }
 
 
-async def handle_db_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_db_post(update, context):
     msg = update.message
-    if not msg or msg.chat.id != DB_CHANNEL:
+    if not msg:
+        return
+
+    if msg.chat.id != DB_CHANNEL:
         return
 
     text = msg.caption or msg.text
     if not text:
         return
 
+    # Run blocking HTTP call in a thread to avoid blocking the event loop
     tmdb = await asyncio.to_thread(search_tmdb, text)
     if not tmdb:
         return
 
-    target = MOVIE_CHANNEL if tmdb["type"] == "movie" else SERIES_CHANNEL
-    
-    buttons = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📥 Download Now", url=DOWNLOAD_LINK)],
-        [InlineKeyboardButton("Join Backup 🎯", url=BACKUP_LINK)],
-    ])
+    title = tmdb["title"]
+    poster = tmdb["poster"]
+    media_type = tmdb["type"]
 
-    caption = f"**{tmdb['title']}**\n\n📥 Download Now 👇"
+    # Select channel
+    target = MOVIE_CHANNEL if media_type == "movie" else SERIES_CHANNEL
+
+    # Buttons
+    buttons = InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("📥 Download Now", url=DOWNLOAD_LINK)],
+            [InlineKeyboardButton("Join Backup 🎯", url=BACKUP_LINK)],
+        ]
+    )
+
+    # Send Poster + Caption
+    caption = f"**{title}**\n\n📥 Download Now 👇"
 
     try:
+        # Use the bot instance provided by the application (context.bot)
         await context.bot.send_photo(
             chat_id=target,
-            photo=tmdb["poster"],
+            photo=poster,
             caption=caption,
             reply_markup=buttons,
             parse_mode="Markdown",
         )
-    except Exception as e:
-        logging.error(f"Failed to send photo: {e}")
+    except Exception:
+        logging.exception("Failed to send photo")
 
-async def post_init(application: Application):
-    bot_info = await application.bot.get_me()
-    logging.info("--------------------------------------------------")
-    logging.info(f"✅ BOT STARTED SUCCESSFULLY!")
-    logging.info(f"🤖 Bot Username: @{bot_info.username}")
-    logging.info(f"🆔 Bot ID: {bot_info.id}")
-    logging.info("--------------------------------------------------")
 
 def main():
-    if BOT_TOKEN == "YOUR_NEW_TOKEN_HERE":
-        logging.critical("❌ ERROR: You must update BOT_TOKEN with the new token from BotFather!")
-        sys.exit(1)
-
-    app = ApplicationBuilder().token(BOT_TOKEN).post_init(post_init).build()
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(MessageHandler(filters.ALL, handle_db_post))
-    
-    logging.info("Initializing Bot...")
-    
-    try:
-        app.run_polling(drop_pending_updates=True)
-    except Conflict:
-        logging.critical("--------------------------------------------------")
-        logging.critical("🛑 CRITICAL ERROR: CONFLICT DETECTED")
-        logging.critical("Another instance of this bot is already running!")
-        logging.critical("SOLUTION: Revoke your Bot Token in @BotFather and update the code.")
-        logging.critical("--------------------------------------------------")
-        sys.exit(1)
-    except Exception as e:
-        logging.critical(f"Fatal error: {e}")
+    logging.info("Bot is running...")
+    # Let the Application manage the event loop and lifecycle.
+    app.run_polling()
+
 
 if __name__ == "__main__":
     main()

@@ -1,5 +1,6 @@
-"""import logging
+import logging
 import requests
+import asyncio
 
 try:
     from telegram import Bot, InputMediaPhoto, InlineKeyboardButton, InlineKeyboardMarkup
@@ -22,15 +23,23 @@ BACKUP_LINK = "http://t.me/Pixell_Pulse"
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN)
 
-def search_tmdb(query):
-    url = f"https://api.themoviedb.org/3/search/multi?api_key={TMDB_API}&query={query}"
-    r = requests.get(url).json()
-
-    if not r["results"]:
+def search_tmdb(query: str):
+    """Synchronous TMDB search helper. Returns dict or None."""
+    try:
+        url = "https://api.themoviedb.org/3/search/multi"
+        params = {"api_key": TMDB_API, "query": query}
+        r = requests.get(url, params=params, timeout=10)
+        r.raise_for_status()
+        data_json = r.json()
+    except Exception as e:
+        logging.exception("TMDB request failed")
         return None
 
-    data = r["results"][0]
+    results = data_json.get("results") or []
+    if not results:
+        return None
 
+    data = results[0]
     poster = f"https://image.tmdb.org/t/p/w500{data['poster_path']}" if data.get("poster_path") else None
     title = data.get("title") or data.get("name")
     type_media = data.get("media_type")   # movie or tv
@@ -44,6 +53,8 @@ def search_tmdb(query):
 
 async def handle_db_post(update, context):
     msg = update.message
+    if not msg:
+        return
 
     if msg.chat.id != DB_CHANNEL:
         return
@@ -52,7 +63,8 @@ async def handle_db_post(update, context):
     if not text:
         return
 
-    tmdb = search_tmdb(text)
+    # Run blocking HTTP call in a thread to avoid blocking the event loop
+    tmdb = await asyncio.to_thread(search_tmdb, text)
     if not tmdb:
         return
 
@@ -75,22 +87,24 @@ async def handle_db_post(update, context):
     # Send Poster + Caption
     caption = f"**{title}**\n\n📥 Download Now 👇"
 
-    await bot.send_photo(
-        chat_id=target,
-        photo=poster,
-        caption=caption,
-        reply_markup=buttons,
-        parse_mode="Markdown"
-    )
+    try:
+        await bot.send_photo(
+            chat_id=target,
+            photo=poster,
+            caption=caption,
+            reply_markup=buttons,
+            parse_mode="Markdown"
+        )
+    except Exception:
+        logging.exception("Failed to send photo")
 
 
 async def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(MessageHandler(filters.ALL, handle_db_post))
-    print("Bot is running...")
+    logging.info("Bot is running...")
     await app.run_polling()
 
 
 if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())"
+    asyncio.run(main())
